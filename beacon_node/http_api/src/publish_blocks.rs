@@ -86,6 +86,8 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
     network_globals: Arc<NetworkGlobals<T::EthSpec>>,
 ) -> Result<Response, Rejection> {
     let seen_timestamp = timestamp_now();
+    let block_publishing_delay = chain.config.block_publishing_delay;
+    let data_column_publishing_delay = chain.config.data_column_publishing_delay;
 
     let (unverified_block, unverified_blobs, is_locally_built_block) = match provenanced_block {
         ProvenancedBlock::Local(block, blobs, _) => (block, blobs, true),
@@ -103,8 +105,13 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
     let publish_block_p2p = move |block: Arc<SignedBeaconBlock<T::EthSpec>>,
                                   sender,
                                   log,
-                                  seen_timestamp|
+                                  seen_timestamp,
+                                  block_publishing_delay|
           -> Result<(), BlockError> {
+        // Add delay before publishing the block to the network.
+        if let Some(block_publishing_delay) = block_publishing_delay {
+            std::thread::sleep(block_publishing_delay);
+        }
         let publish_timestamp = timestamp_now();
         let publish_delay = publish_timestamp
             .checked_sub(seen_timestamp)
@@ -152,6 +159,7 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
             sender_clone.clone(),
             log.clone(),
             seen_timestamp,
+            block_publishing_delay,
         )
         .map_err(|_| warp_utils::reject::custom_server_error("unable to publish".into()))?;
     }
@@ -167,6 +175,7 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
                     sender_clone.clone(),
                     log.clone(),
                     seen_timestamp,
+                    block_publishing_delay,
                 )?,
                 BroadcastValidation::ConsensusAndEquivocation => {
                     check_slashable(&chain, block_root, &block_to_publish, &log)?;
@@ -175,6 +184,7 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
                         sender_clone.clone(),
                         log.clone(),
                         seen_timestamp,
+                        block_publishing_delay,
                     )?;
                 }
             };
@@ -207,6 +217,10 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
     }
 
     if gossip_verified_columns.iter().map(Option::is_some).count() > 0 {
+        // Add delay before publishing the data columns to the network.
+        if let Some(data_column_publishing_delay) = data_column_publishing_delay {
+            tokio::time::sleep(data_column_publishing_delay).await;
+        }
         publish_column_sidecars(network_tx, &gossip_verified_columns, &chain).map_err(|_| {
             warp_utils::reject::custom_server_error("unable to publish data column sidecars".into())
         })?;
