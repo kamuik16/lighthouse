@@ -1597,7 +1597,8 @@ pub fn cli_app() -> Command {
                 .action(ArgAction::Set)
                 .help_heading(FLAG_HEADER)
                 .help("TESTING ONLY: Artificially delay block publishing by the specified number of seconds. \
-                       DO NOT USE IN PRODUCTION.")
+                        This only works for if `BroadcastValidation::Gossip` is used (default). \
+                        DO NOT USE IN PRODUCTION.")
                 .hide(true)
                 .display_order(0)
         )
@@ -1608,6 +1609,8 @@ pub fn cli_app() -> Command {
                 .action(ArgAction::Set)
                 .help_heading(FLAG_HEADER)
                 .help("TESTING ONLY: Artificially delay data column publishing by the specified number of seconds. \
+                       Limitation: If `delay-block-publishing` is also used, data columns will be delayed for a \
+                       minimum of `delay-block-publishing` seconds.
                        DO NOT USE IN PRODUCTION.")
                 .hide(true)
                 .display_order(0)

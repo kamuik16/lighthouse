@@ -888,11 +888,11 @@ pub fn get_config<E: EthSpec>(
         clap_utils::parse_required(cli_args, "beacon-processor-aggregate-batch-size")?;
 
     if let Some(delay) = clap_utils::parse_optional(cli_args, "delay-block-publishing")? {
-        client_config.chain.block_publishing_delay = Some(Duration::from_secs(delay));
+        client_config.chain.block_publishing_delay = Some(Duration::from_secs_f64(delay));
     }
 
     if let Some(delay) = clap_utils::parse_optional(cli_args, "delay-data-column-publishing")? {
-        client_config.chain.data_column_publishing_delay = Some(Duration::from_secs(delay));
+        client_config.chain.data_column_publishing_delay = Some(Duration::from_secs_f64(delay));
     }
 
     Ok(client_config)

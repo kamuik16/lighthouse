@@ -86,8 +86,8 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
     network_globals: Arc<NetworkGlobals<T::EthSpec>>,
 ) -> Result<Response, Rejection> {
     let seen_timestamp = timestamp_now();
-    let block_publishing_delay = chain.config.block_publishing_delay;
-    let data_column_publishing_delay = chain.config.data_column_publishing_delay;
+    let block_publishing_delay_for_testing = chain.config.block_publishing_delay;
+    let data_column_publishing_delay_for_testing = chain.config.data_column_publishing_delay;
 
     let (unverified_block, unverified_blobs, is_locally_built_block) = match provenanced_block {
         ProvenancedBlock::Local(block, blobs, _) => (block, blobs, true),
@@ -105,13 +105,8 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
     let publish_block_p2p = move |block: Arc<SignedBeaconBlock<T::EthSpec>>,
                                   sender,
                                   log,
-                                  seen_timestamp,
-                                  block_publishing_delay|
+                                  seen_timestamp|
           -> Result<(), BlockError> {
-        // Add delay before publishing the block to the network.
-        if let Some(block_publishing_delay) = block_publishing_delay {
-            std::thread::sleep(block_publishing_delay);
-        }
         let publish_timestamp = timestamp_now();
         let publish_delay = publish_timestamp
             .checked_sub(seen_timestamp)
@@ -154,12 +149,19 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
 
     let should_publish_block = gossip_verified_block_result.is_ok();
     if BroadcastValidation::Gossip == validation_level && should_publish_block {
+        if let Some(block_publishing_delay) = block_publishing_delay_for_testing {
+            debug!(
+                log,
+                "Publishing block with artificial delay";
+                "block_publishing_delay" => ?block_publishing_delay
+            );
+            tokio::time::sleep(block_publishing_delay).await;
+        }
         publish_block_p2p(
             block.clone(),
             sender_clone.clone(),
             log.clone(),
             seen_timestamp,
-            block_publishing_delay,
         )
         .map_err(|_| warp_utils::reject::custom_server_error("unable to publish".into()))?;
     }
@@ -175,7 +177,6 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
                     sender_clone.clone(),
                     log.clone(),
                     seen_timestamp,
-                    block_publishing_delay,
                 )?,
                 BroadcastValidation::ConsensusAndEquivocation => {
                     check_slashable(&chain, block_root, &block_to_publish, &log)?;
@@ -184,7 +185,6 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
                         sender_clone.clone(),
                         log.clone(),
                         seen_timestamp,
-                        block_publishing_delay,
                     )?;
                 }
             };
@@ -217,9 +217,22 @@ pub async fn publish_block<T: BeaconChainTypes, B: IntoGossipVerifiedBlock<T>>(
     }
 
     if gossip_verified_columns.iter().map(Option::is_some).count() > 0 {
-        // Add delay before publishing the data columns to the network.
-        if let Some(data_column_publishing_delay) = data_column_publishing_delay {
-            tokio::time::sleep(data_column_publishing_delay).await;
+        if let Some(data_column_publishing_delay) = data_column_publishing_delay_for_testing {
+            // Subtract block publishing delay if it is also used.
+            // Note: if `data_column_publishing_delay` is less than `block_publishing_delay`, it
+            // will still be delayed by `block_publishing_delay`. This could be solved with spawning
+            // async tasks but the limitation is minor and I believe it's probably not worth
+            // affecting the mainnet code path.
+            let block_publishing_delay = block_publishing_delay_for_testing.unwrap_or_default();
+            let delay = data_column_publishing_delay.saturating_sub(block_publishing_delay);
+            if !delay.is_zero() {
+                debug!(
+                    log,
+                    "Publishing data columns with artificial delay";
+                    "data_column_publishing_delay" => ?data_column_publishing_delay
+                );
+                tokio::time::sleep(delay).await;
+            }
         }
         publish_column_sidecars(network_tx, &gossip_verified_columns, &chain).map_err(|_| {
             warp_utils::reject::custom_server_error("unable to publish data column sidecars".into())
